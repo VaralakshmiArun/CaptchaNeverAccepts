@@ -25,10 +25,15 @@ export default {
           '0%, 100%': { boxShadow: '0 0 0px rgba(255,61,129,0.4)' },
           '50%': { boxShadow: '0 0 25px rgba(255,61,129,0.8)' },
         },
+        pop: {
+          '0%': { transform: 'scale(0.85)', opacity: '0' },
+          '100%': { transform: 'scale(1)', opacity: '1' },
+        },
       },
       animation: {
         shake: 'shake 0.4s ease-in-out',
         pulseGlow: 'pulseGlow 2s ease-in-out infinite',
+        pop: 'pop 0.25s ease-out',
       },
     },
   },

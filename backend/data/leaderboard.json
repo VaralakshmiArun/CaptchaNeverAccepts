@@ -1,0 +1,22 @@
+{
+  "chaos_tester": {
+    "fails": 1,
+    "title": "Rookie Failure"
+  },
+  "definitely_a_human": {
+    "fails": 31,
+    "title": "CAPTCHA's Worst Enemy"
+  },
+  "m": {
+    "fails": 1,
+    "title": "Rookie Failure"
+  },
+  "N": {
+    "fails": 1,
+    "title": "Rookie Failure"
+  },
+  "M": {
+    "fails": 1,
+    "title": "Rookie Failure"
+  }
+}
