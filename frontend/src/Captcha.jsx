@@ -366,7 +366,10 @@ export default function Captcha({ onVerified }) {
           <p className="text-sm text-zinc-300">
             Final step: click Verify. It may not want to be clicked.
           </p>
-          <div className="relative h-28 bg-black/30 border border-white/10 rounded-lg overflow-hidden">
+          {/* Flex centers the button; the inline transform only adds the dodge
+              offset. (Putting translate(-50%,-50%) centering classes on the
+              button itself would be overridden by the inline transform.) */}
+          <div className="relative h-28 bg-black/30 border border-white/10 rounded-lg overflow-hidden flex items-center justify-center">
             <button
               type="button"
               onMouseEnter={handleDodgeHover}
@@ -375,7 +378,7 @@ export default function Captcha({ onVerified }) {
               style={{
                 transform: `translate(${dodgePos.x}px, ${dodgePos.y}px)`,
               }}
-              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-glitch hover:bg-pink-600 disabled:opacity-60 text-black font-display font-bold px-6 py-2.5 rounded-lg transition-transform duration-150 animate-pulseGlow"
+              className="bg-glitch hover:bg-pink-600 disabled:opacity-60 text-black font-display font-bold px-6 py-2.5 rounded-lg transition-transform duration-150 animate-pulseGlow"
             >
               {loading ? 'Judging you...' : 'Verify'}
             </button>
