@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 // A fake distorted-looking captcha string, purely for show — it is never
 // actually checked against anything, because nothing you type will ever work.
@@ -12,7 +12,32 @@ function generateFakeCaptchaText() {
 }
 
 // ---------------------------------------------------------------------------
-// Stage 1: "Select all squares with ___" image grid. The prompt gets more
+// Tunables for maximum suffering.
+// ---------------------------------------------------------------------------
+const CHECKBOX_ATTEMPTS_REQUIRED = 4;
+const GRID_ROUNDS_REQUIRED = 5;
+const SLIDER_SNAPBACKS_REQUIRED = 3;
+const DODGE_COUNT_REQUIRED = 4;
+
+// ---------------------------------------------------------------------------
+// Stage 2: the "I'm not a robot" box that keeps unchecking itself.
+// ---------------------------------------------------------------------------
+const CHECKBOX_LABELS = [
+  'I am not a robot',
+  'I am DEFINITELY not a robot',
+  'I am not a robot, legally speaking',
+  'I am a human and I have the paperwork to prove it',
+  'I am so human it is honestly a problem',
+];
+const CHECKBOX_REJECTIONS = [
+  "Unchecked. Robots love checkboxes too, you know.",
+  "Nope. Your cursor movement had 'synthetic' energy.",
+  "Suspiciously fast clicking. Bots click fast. Next.",
+  "Almost passed. Just kidding — we deleted your checkmark out of spite.",
+];
+
+// ---------------------------------------------------------------------------
+// Stage 3: "Select all squares with ___" image grid. The prompt gets more
 // unreasonable each round. Nothing you select is ever correct.
 // ---------------------------------------------------------------------------
 const GRID_EMOJI = ['🌮', '🚦', '🐐', '🛸', '🧦', '🪑', '🫠', '🧠', '🪱', '🎺', '🧊', '🥽', '🍄', '🦴', '🧵'];
@@ -29,6 +54,13 @@ const GRID_REJECTIONS = [
   "Nope. You selected the one square that was rooting against you.",
   "Wrong. The correct answer was 'none of them, this is a trap.'",
   "Incorrect. Somehow worse than your last guess.",
+  "Wrong. The grid has started a group chat about you.",
+  "Nope. A neural net just judged your taste in emojis.",
+  "Incorrect. The correct squares were metaphorical.",
+];
+const GRID_FINAL_LINES = [
+  'Fine. The grid surrenders. Out of pity, not correctness.',
+  "The grid is tired. You may proceed to your next disappointment.",
 ];
 
 function generateGrid() {
@@ -39,18 +71,49 @@ function generateGrid() {
   return cells;
 }
 
-const GRID_ROUNDS_REQUIRED = 3;
-const SLIDER_SNAPBACKS_REQUIRED = 2;
-const DODGE_COUNT_REQUIRED = 4;
-
+// ---------------------------------------------------------------------------
+// Stage 4: the slider that snaps back to zero.
+// ---------------------------------------------------------------------------
 const SLIDER_SNAPBACK_LINES = [
-  "So close. Snapping back to zero, purely for comedic effect.",
+  'So close. Snapping back to zero, purely for comedic effect.',
   "Almost! Just kidding — back to zero with you.",
   "That's cute. Try convincing gravity next.",
+  'Third snap. Bureaucracy demands exactly three.',
+];
+const SLIDER_100_LINES = [
+  "100%! Wow, an actual achievement. Doesn't count for anything though.",
+  '100%. Astounding. We are analyzing it anyway, obviously.',
 ];
 
+// ---------------------------------------------------------------------------
+// Stage 5: the Verify button that does not want to be clicked.
+// ---------------------------------------------------------------------------
+const DODGE_LINES = [
+  'Whoops. Slipped. Butter fingers.',
+  'The button is shy. Recommend therapy.',
+  "You're embarrassing it in front of the other buttons.",
+  "It's not you. Wait. It's absolutely you.",
+  'No means no.',
+  'The button has filed a restraining order.',
+  'Clicking with confidence is still clicking.',
+  'It moved. That is the entire feature.',
+];
+const DODGE_HOLD_STILL_LINE = 'Fine. It will hold still now. Mostly out of pity.';
+
+// ---------------------------------------------------------------------------
+// Stage 6: the fake AI verdict.
+// ---------------------------------------------------------------------------
+const ANALYSIS_QUIPS = [
+  { until: 25, text: 'Scanning for a soul...' },
+  { until: 50, text: 'Comparing against 8.7 billion known humans...' },
+  { until: 75, text: 'Consulting the robot council...' },
+  { until: 99, text: 'Rendering verdict...' },
+];
+const ANALYSIS_DURATION_MS = 2800;
+
 export default function Captcha({ onVerified }) {
-  // Wizard stage: 'username' -> 'grid' -> 'slider' -> 'dodge' -> 'final'
+  // Wizard stage: 'username' -> 'notarobot' -> 'grid' -> 'slider' -> 'dodge'
+  //   -> 'analyzing' -> 'final'
   const [stage, setStage] = useState('username');
 
   const [username, setUsername] = useState('');
@@ -58,10 +121,17 @@ export default function Captcha({ onVerified }) {
   const [captchaText, setCaptchaText] = useState(generateFakeCaptchaText());
 
   const [roast, setRoast] = useState('');
+  const [failCount, setFailCount] = useState(null);
+  const [title, setTitle] = useState('');
   const [shake, setShake] = useState(false);
   const [loading, setLoading] = useState(false);
   const [audioLoading, setAudioLoading] = useState(false);
   const audioRef = useRef(null);
+
+  // --- "not a robot" checkbox stage ---
+  const [checkboxChecked, setCheckboxChecked] = useState(false);
+  const [checkboxAttempts, setCheckboxAttempts] = useState(0);
+  const [checkboxMessage, setCheckboxMessage] = useState('');
 
   // --- grid stage state ---
   const [gridCells, setGridCells] = useState(generateGrid());
@@ -78,6 +148,12 @@ export default function Captcha({ onVerified }) {
   const [dodgeCount, setDodgeCount] = useState(0);
   const [dodgePos, setDodgePos] = useState({ x: 0, y: 0 });
   const [dodgeMessage, setDodgeMessage] = useState('Just click the button. If you can.');
+  const stageRef = useRef(null);
+  const cursorRef = useRef(null); // cursor pos relative to stage center
+  const cursorInZoneRef = useRef(false); // cursor currently over the button zone
+
+  // --- fake AI analysis finale ---
+  const [analysisProgress, setAnalysisProgress] = useState(0);
 
   const gridPromptIndex = Math.min(gridRound, GRID_PROMPTS.length - 1);
 
@@ -97,7 +173,29 @@ export default function Captcha({ onVerified }) {
       return;
     }
     setRoast('');
-    setStage('grid');
+    setStage('notarobot');
+  }
+
+  // ---- Stage: "I'm not a robot" checkbox that keeps unchecking itself ----
+  function handleCheckboxClick() {
+    if (checkboxChecked) return;
+    setCheckboxChecked(true);
+
+    const attempt = checkboxAttempts + 1;
+    setCheckboxAttempts(attempt);
+    setCheckboxMessage('');
+
+    setTimeout(() => {
+      setCheckboxChecked(false);
+      if (attempt >= CHECKBOX_ATTEMPTS_REQUIRED) {
+        setCheckboxMessage('Fine. We checked it for you. Legally, this is binding.');
+        setTimeout(() => setStage('grid'), 1100);
+      } else {
+        setCheckboxMessage(
+          CHECKBOX_REJECTIONS[Math.min(attempt - 1, CHECKBOX_REJECTIONS.length - 1)]
+        );
+      }
+    }, 550);
   }
 
   // ---- Stage: grid ----
@@ -118,7 +216,7 @@ export default function Captcha({ onVerified }) {
     triggerShake();
 
     if (nextRound >= GRID_ROUNDS_REQUIRED) {
-      setGridMessage("Fine. We're letting you through out of pity, not correctness.");
+      setGridMessage(GRID_FINAL_LINES[nextRound % GRID_FINAL_LINES.length]);
       setTimeout(() => {
         setStage('slider');
         setGridMessage('');
@@ -148,38 +246,67 @@ export default function Captcha({ onVerified }) {
     setSliderValue(val);
 
     if (val >= 100) {
-      setSliderMessage("100%! Wow, an actual achievement. Doesn't count for anything though.");
-      setTimeout(() => {
-        setStage('dodge');
-        setSliderMessage('');
-      }, 900);
+      setSliderMessage(SLIDER_100_LINES[sliderSnapbacks % SLIDER_100_LINES.length]);
+      setTimeout(() => setStage('dodge'), 900);
     }
   }
 
-  // ---- Stage: dodge button ----
-  function handleDodgeHover(e) {
+  // ---- Stage: dodging verify button ----
+  function performDodge() {
     if (dodgeCount >= DODGE_COUNT_REQUIRED) return;
 
-    const container = e.currentTarget.parentElement.getBoundingClientRect();
-    const maxX = Math.max(container.width - 140, 40);
-    const maxY = Math.max(container.height - 44, 20);
-    const newX = Math.random() * maxX - maxX / 2;
-    const newY = Math.random() * maxY - maxY / 2;
+    const stageEl = stageRef.current;
+    const marginX = stageEl ? Math.max(stageEl.offsetWidth / 2 - 55, 0) : 100;
+    const marginY = stageEl ? Math.max(stageEl.offsetHeight / 2 - 28, 0) : 40;
 
-    setDodgePos({ x: newX, y: newY });
+    let nx = 0;
+    let ny = 0;
+    const cursor = cursorRef.current;
+    for (let tries = 0; tries < 20; tries++) {
+      nx = (Math.random() * 2 - 1) * marginX;
+      ny = (Math.random() * 2 - 1) * marginY;
+      // Prefer spots far away from the cursor so it never lands under the mouse.
+      if (!cursor || Math.hypot(nx - cursor.x, ny - cursor.y) > 90) break;
+    }
+
+    setDodgePos({ x: nx, y: ny });
     setDodgeCount((n) => n + 1);
-
-    const lines = [
-      'Almost had it.',
-      "Nope! Come on, try again.",
-      'This button has trust issues.',
-      "It's not you, it's... okay it's you.",
-    ];
-    setDodgeMessage(lines[Math.floor(Math.random() * lines.length)]);
+    setDodgeMessage(DODGE_LINES[dodgeCount % DODGE_LINES.length]);
+    cursorInZoneRef.current = false;
   }
 
+  function handleStageMouseMove(e) {
+    const stageEl = stageRef.current;
+    if (!stageEl) return;
+    const rect = stageEl.getBoundingClientRect();
+    const cx = e.clientX - rect.left - rect.width / 2;
+    const cy = e.clientY - rect.top - rect.height / 2;
+    cursorRef.current = { x: cx, y: cy };
+
+    if (dodgeCount >= DODGE_COUNT_REQUIRED) return;
+
+    const dist = Math.hypot(cx - dodgePos.x, cy - dodgePos.y);
+    if (dist < 70 && !cursorInZoneRef.current) {
+      cursorInZoneRef.current = true;
+      performDodge();
+    } else if (dist >= 70) {
+      cursorInZoneRef.current = false;
+    }
+  }
+
+  function handleDodgeClick() {
+    if (dodgeCount < DODGE_COUNT_REQUIRED) {
+      setDodgeMessage('Clicking harder is not a strategy. That one counts as an attempt.');
+      performDodge();
+      return;
+    }
+    handleFinalVerify();
+  }
+
+  // ---- Fake AI verdict, then the real (rigged) verify call ----
   async function handleFinalVerify() {
     setLoading(true);
+    setStage('analyzing');
     try {
       const res = await fetch('/verifyCaptcha', {
         method: 'POST',
@@ -188,6 +315,8 @@ export default function Captcha({ onVerified }) {
       });
       const data = await res.json();
       setRoast(data.message);
+      setFailCount(data.failCount);
+      setTitle(data.title);
       triggerShake();
       if (onVerified) onVerified(data);
     } catch (err) {
@@ -197,10 +326,28 @@ export default function Captcha({ onVerified }) {
     }
   }
 
+  useEffect(() => {
+    if (stage !== 'analyzing') return undefined;
+    setAnalysisProgress(0);
+    const t0 = Date.now();
+    const id = setInterval(() => {
+      const p = Math.min(99, Math.round(((Date.now() - t0) / ANALYSIS_DURATION_MS) * 100));
+      setAnalysisProgress(p);
+      if (p >= 99) {
+        clearInterval(id);
+        setTimeout(() => setStage('final'), 700);
+      }
+    }, 80);
+    return () => clearInterval(id);
+  }, [stage]);
+
   function handleRestart() {
     setStage('username');
     setCaptchaInput('');
     refreshCaptcha();
+    setCheckboxChecked(false);
+    setCheckboxAttempts(0);
+    setCheckboxMessage('');
     setGridRound(0);
     setGridCells(generateGrid());
     setGridSelected([]);
@@ -211,7 +358,12 @@ export default function Captcha({ onVerified }) {
     setDodgeCount(0);
     setDodgePos({ x: 0, y: 0 });
     setDodgeMessage('Just click the button. If you can.');
+    cursorRef.current = null;
+    cursorInZoneRef.current = false;
+    setAnalysisProgress(0);
     setRoast('');
+    setFailCount(null);
+    setTitle('');
   }
 
   async function handlePlayAudio() {
@@ -228,8 +380,13 @@ export default function Captcha({ onVerified }) {
     }
   }
 
-  const stageOrder = ['username', 'grid', 'slider', 'dodge', 'final'];
-  const stepNumber = stageOrder.indexOf(stage) + 1;
+  const stageOrder = ['username', 'notarobot', 'grid', 'slider', 'dodge', 'analyzing', 'final'];
+  const stepNumber = Math.min(stageOrder.indexOf(stage) + 1, 5);
+
+  const checkboxLabel =
+    CHECKBOX_LABELS[Math.min(checkboxAttempts, CHECKBOX_LABELS.length - 1)];
+  const analysisQuip = ANALYSIS_QUIPS.find((q) => analysisProgress < q.until)?.text ||
+    'Rendering verdict...';
 
   return (
     <div
@@ -244,7 +401,7 @@ export default function Captcha({ onVerified }) {
         A captcha engineered with a single feature: it will never let you in.
       </p>
       <p className="text-xs text-zinc-500 mb-6">
-        Step {Math.min(stepNumber, 4)} of 4
+        Step {stepNumber} of 5
         {stage !== 'username' && (
           <button
             type="button"
@@ -306,6 +463,38 @@ export default function Captcha({ onVerified }) {
         </form>
       )}
 
+      {/* ---------- Stage: "I'm not a robot" box that unchecks itself ---------- */}
+      {stage === 'notarobot' && (
+        <div className="space-y-4">
+          <p className="text-sm text-zinc-300">
+            Last chance to leave with your dignity. Check the box.
+          </p>
+          <button
+            type="button"
+            onClick={handleCheckboxClick}
+            className={`w-full flex items-center gap-3 bg-black/40 border rounded-lg px-4 py-3 text-left transition-colors ${
+              checkboxChecked ? 'border-zap' : 'border-white/10 hover:border-white/30'
+            }`}
+          >
+            <span
+              className={`w-5 h-5 rounded border flex items-center justify-center text-sm font-bold ${
+                checkboxChecked
+                  ? 'bg-zap border-zap text-black'
+                  : 'border-zinc-500 text-transparent'
+              }`}
+            >
+              ✓
+            </span>
+            <span className={`text-sm ${checkboxChecked ? 'text-zap' : 'text-zinc-300'}`}>
+              {checkboxLabel}
+            </span>
+          </button>
+          {checkboxMessage && (
+            <p className="text-sm text-toxic font-medium">{checkboxMessage}</p>
+          )}
+        </div>
+      )}
+
       {/* ---------------- Stage: image grid ---------------- */}
       {stage === 'grid' && (
         <div className="space-y-4">
@@ -353,7 +542,12 @@ export default function Captcha({ onVerified }) {
             onChange={handleSliderChange}
             className="w-full accent-glitch"
           />
-          <p className="text-xs text-zinc-500">{sliderValue}%</p>
+          <p className="text-xs text-zinc-500">
+            {sliderValue}%{' '}
+            {sliderValue > 0 && sliderValue < 100 && sliderValue >= 95
+              ? '(careful. it knows.)'
+              : ''}
+          </p>
           {sliderMessage && (
             <p className="text-sm text-toxic font-medium">{sliderMessage}</p>
           )}
@@ -369,11 +563,20 @@ export default function Captcha({ onVerified }) {
           {/* Flex centers the button; the inline transform only adds the dodge
               offset. (Putting translate(-50%,-50%) centering classes on the
               button itself would be overridden by the inline transform.) */}
-          <div className="relative h-28 bg-black/30 border border-white/10 rounded-lg overflow-hidden flex items-center justify-center">
+          <div
+            ref={stageRef}
+            onMouseMove={handleStageMouseMove}
+            className="relative h-28 bg-black/30 border border-white/10 rounded-lg overflow-hidden flex items-center justify-center"
+          >
             <button
               type="button"
-              onMouseEnter={handleDodgeHover}
-              onClick={dodgeCount >= DODGE_COUNT_REQUIRED ? handleFinalVerify : undefined}
+              onMouseEnter={() => {
+                if (dodgeCount < DODGE_COUNT_REQUIRED && !cursorInZoneRef.current) {
+                  cursorInZoneRef.current = true;
+                  performDodge();
+                }
+              }}
+              onClick={handleDodgeClick}
               disabled={loading}
               style={{
                 transform: `translate(${dodgePos.x}px, ${dodgePos.y}px)`,
@@ -384,27 +587,52 @@ export default function Captcha({ onVerified }) {
             </button>
           </div>
           <p className="text-xs text-zinc-500">
-            {dodgeCount >= DODGE_COUNT_REQUIRED
-              ? 'Fine. It will hold still now. Go ahead.'
-              : dodgeMessage}
+            {dodgeCount >= DODGE_COUNT_REQUIRED ? DODGE_HOLD_STILL_LINE : dodgeMessage}
+          </p>
+        </div>
+      )}
+
+      {/* ---------------- Stage: fake AI analysis ---------------- */}
+      {stage === 'analyzing' && (
+        <div className="space-y-4 py-2">
+          <p className="text-sm text-zinc-300">
+            Analyzing your humanity with enterprise-grade AI™...
+          </p>
+          <div className="w-full h-3 bg-black/40 border border-white/10 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-zap to-glitch transition-all duration-100"
+              style={{ width: `${analysisProgress}%` }}
+            />
+          </div>
+          <p className="text-xs text-zinc-500">
+            {analysisQuip} <span className="text-glitch">{analysisProgress}%</span>
           </p>
         </div>
       )}
 
       <audio ref={audioRef} src="/audioCaptcha" preload="none" />
 
-      <button
-        type="button"
-        onClick={handlePlayAudio}
-        disabled={audioLoading}
-        className="w-full mt-4 bg-zap/20 hover:bg-zap/30 disabled:opacity-60 text-zap border border-zap/40 font-display font-bold py-2 rounded-lg transition-colors text-sm"
-      >
-        {audioLoading ? 'Loading noise...' : '🔊 Audio Captcha (equally useless)'}
-      </button>
+      {stage !== 'final' && (
+        <button
+          type="button"
+          onClick={handlePlayAudio}
+          disabled={audioLoading}
+          className="w-full mt-4 bg-zap/20 hover:bg-zap/30 disabled:opacity-60 text-zap border border-zap/40 font-display font-bold py-2 rounded-lg transition-colors text-sm"
+        >
+          {audioLoading ? 'Loading noise...' : '🔊 Audio Captcha (equally useless)'}
+        </button>
+      )}
 
-      {roast && (
-        <div className="mt-5 bg-black/50 border border-glitch/40 rounded-lg px-4 py-3 text-sm text-toxic font-medium">
-          {roast}
+      {/* ---------------- Stage: the verdict ---------------- */}
+      {stage === 'final' && roast && (
+        <div className="mt-2 bg-black/50 border border-glitch/40 rounded-lg px-4 py-3 text-sm">
+          <p className="text-toxic font-medium">{roast}</p>
+          {failCount != null && (
+            <p className="mt-2 text-xs text-zinc-400">
+              Verdict logged: fail #{failCount}
+              {title && <span className="text-glitch"> · {title}</span>}
+            </p>
+          )}
           <button
             type="button"
             onClick={handleRestart}

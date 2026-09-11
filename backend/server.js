@@ -13,70 +13,160 @@ app.use(cors());
 app.use(express.json());
 
 // ---------------------------------------------------------------------------
-// In-memory "database" — resets whenever the server restarts, much like your
-// hopes of ever passing this captcha.
+// Leaderboard "database" — a JSON file on disk. Unlike your hopes of ever
+// passing this captcha, fail counts now survive server restarts.
 // ---------------------------------------------------------------------------
-const leaderboard = {};
+const DATA_DIR = path.join(__dirname, 'data');
+const DATA_PATH = path.join(DATA_DIR, 'leaderboard.json');
+
+// entry shape: { fails: number, title: string }
+const leaderboard = loadLeaderboard();
+
+function loadLeaderboard() {
+  try {
+    const raw = fs.readFileSync(DATA_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    // tolerate old plain { name: count } shapes
+    for (const [name, v] of Object.entries(parsed)) {
+      parsed[name] = typeof v === 'number' ? { fails: v, title: titleFor(v) } : v;
+    }
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function saveLeaderboard() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(DATA_PATH, JSON.stringify(leaderboard, null, 2));
+}
 
 // ---------------------------------------------------------------------------
-// Sarcastic roast lines. Feel free to add more — the more, the merrier.
+// Titles, unlocked by dedicated failure.
 // ---------------------------------------------------------------------------
-const ROASTS = [
-  "Nice try. A CAPTCHA-solving AI wept just now.",
-  "Wrong. Also, your keyboard called — it wants an apology.",
-  "That's adorable. Try again, or don't. I'm not your boss.",
-  "Incorrect. Have you considered a career that doesn't involve typing?",
-  "Nope. Somewhere, a robot is laughing at you right now.",
-  "Failed. Statistically impressive, honestly — how do you do it?",
-  "Wrong again. At this point it feels personal.",
-  "Access denied. Not because of the captcha — I just don't like you.",
-  "That answer was so wrong it looped back around to impressive.",
-  "Incorrect. I've seen toddlers do better, and they can't read.",
-  "Nope. This captcha has trust issues, and you're not helping.",
-  "Wrong. Please consult a magic 8-ball; it has better odds.",
-  "Failed. I'd say 'better luck next time' but we both know that's a lie.",
-  "Incorrect. Somewhere a CAPTCHA designer is very proud of this moment.",
-  "Nope, still human-proof. Mostly you-proof, specifically.",
-  "Wrong. Are you even trying, or is this performance art?",
-  "That was almost right, in the sense that it was a string of characters.",
-  "Denied. This captcha doesn't accept excuses, or you, apparently.",
-  "Incorrect. On the bright side, you're very consistent.",
-  "Nope. I've recalibrated my expectations of you downward. Again.",
+const TITLE_TIERS = [
+  { at: 100, title: 'CaptchaEverAccepts: 0% Since Birth' },
+  { at: 50, title: 'Living Legend of Losing' },
+  { at: 25, title: "CAPTCHA's Worst Enemy" },
+  { at: 10, title: 'Grandmaster of Failing' },
+  { at: 5, title: 'Certified Disappointment' },
+  { at: 1, title: 'Rookie Failure' },
+  { at: 0, title: 'Untested Victim' },
 ];
 
-function getRoast() {
-  return ROASTS[Math.floor(Math.random() * ROASTS.length)];
+function titleFor(fails) {
+  return TITLE_TIERS.find((t) => fails >= t.at).title;
+}
+
+// ---------------------------------------------------------------------------
+// Sarcastic roast lines, escalating the more you fail. The captcha gets
+// personally invested in your downfall.
+// ---------------------------------------------------------------------------
+const ROAST_TIERS = [
+  // 1–2 fails: light sarcasm
+  [
+    'Wrong. But hey, first attempts build character.',
+    'Nope. A CAPTCHA-solving AI wept just now.',
+    'Incorrect. Have you tried... reading?',
+    "That's adorable. Try again, or don't. I'm not your boss.",
+    'Failed. Statistically impressive, honestly — how do you do it?',
+    'Wrong. Please consult a magic 8-ball; it has better odds.',
+  ],
+  // 3–6 fails: it's getting personal
+  [
+    'Wrong again. At this point it feels personal.',
+    "Nope. This captcha has trust issues, and you're not helping.",
+    "Incorrect. I've seen toddlers do better, and they can't read.",
+    'Still wrong. Somewhere, a robot is laughing at you specifically.',
+    'Failed. Your keyboard called — it wants an apology.',
+    "Nope. I've recalibrated my expectations of you downward. Again.",
+  ],
+  // 7–14 fails: psychological experiment
+  [
+    'Wrong. Your persistence is admirable. Your accuracy is not.',
+    'Incorrect. The captcha has started telling its friends about you.',
+    'Failed. Scientists are studying your technique. Results: concerning.',
+    "Nope. This is now a psychological experiment. You're the control group.",
+    'Wrong. Are you even trying, or is this performance art?',
+    "Denied. This captcha doesn't accept excuses, or you, apparently.",
+  ],
+  // 15–29 fails: generational shame
+  [
+    'Wrong. The captcha now lists you as a dependent.',
+    'Incorrect. This stopped being a captcha and became a lifestyle.',
+    'Failed. Your great-grandchildren will hear of this shame.',
+    "Nope. We emailed your failures to everyone you know. They replied 'sounds right'.",
+    'Wrong. The robots have voted. It was unanimous.',
+    "Incorrect. Historians will call this era 'the blunder years'.",
+  ],
+  // 30+ fails: legendary
+  [
+    'Wrong. Honestly? Respect. This level of failure takes commitment.',
+    'Incorrect. You failed so hard the captcha feels bad for your family.',
+    'Failed. The leaderboard ran out of trophies for you.',
+    'Nope. Your name is now a unit of measurement for disappointment.',
+    'Wrong. Even the audio captcha feels proud by comparison.',
+    'Incorrect. You are the reason this captcha has job security.',
+  ],
+];
+
+function getRoast(fails) {
+  const tier = ROAST_TIERS[Math.min(ROAST_TIERS.length - 1, Math.floor((fails - 1) / 7))];
+  return tier[Math.floor(Math.random() * tier.length)];
 }
 
 // ---------------------------------------------------------------------------
 // POST /verifyCaptcha
 // Body: { username: string, captchaInput: string }
-// Always returns success: false, with a random roast, and bumps the
-// leaderboard fail count for that username.
+// Always returns success: false, plus a roast calibrated to your suffering,
+// your fail count, and your freshly unlocked title.
 // ---------------------------------------------------------------------------
 app.post('/verifyCaptcha', (req, res) => {
   const { username } = req.body || {};
   const cleanName = (typeof username === 'string' && username.trim()) || 'Anonymous Failure';
 
-  leaderboard[cleanName] = (leaderboard[cleanName] || 0) + 1;
+  const entry = leaderboard[cleanName] || { fails: 0, title: titleFor(0) };
+  entry.fails += 1;
+  entry.title = titleFor(entry.fails);
+  leaderboard[cleanName] = entry;
+
+  saveLeaderboard();
 
   res.json({
     success: false,
-    message: getRoast(),
-    failCount: leaderboard[cleanName],
+    message: getRoast(entry.fails),
+    failCount: entry.fails,
+    title: entry.title,
   });
 });
 
 // ---------------------------------------------------------------------------
 // GET /leaderboard
-// Returns usernames and fail counts, sorted by most failures first.
+// Returns usernames, fail counts and titles, sorted by most failures first.
 // ---------------------------------------------------------------------------
 app.get('/leaderboard', (req, res) => {
   const entries = Object.entries(leaderboard)
-    .map(([username, fails]) => ({ username, fails }))
+    .map(([username, v]) => ({
+      username,
+      fails: v.fails,
+      title: v.title || titleFor(v.fails),
+    }))
     .sort((a, b) => b.fails - a.fails);
 
   res.json(entries);
+});
+
+// ---------------------------------------------------------------------------
+// GET /stats — global numbers for the leaderboard footer.
+// ---------------------------------------------------------------------------
+app.get('/stats', (req, res) => {
+  const judgedHumans = Object.keys(leaderboard).length;
+  const totalFails = Object.values(leaderboard).reduce((sum, v) => sum + v.fails, 0);
+  res.json({
+    judgedHumans,
+    totalFails,
+    passRate: 0, // it's the whole point of the product
+  });
 });
 
 // ---------------------------------------------------------------------------
