@@ -1,7 +1,7 @@
 # CaptchaNeverAccepts
 
-A captcha that never, ever accepts you — by design. Built for hackathon demos
-where the joke is the product.
+A captcha that never, ever accepts you — by design.
+
 
 ## Project structure
 
