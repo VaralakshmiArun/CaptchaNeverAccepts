@@ -30,7 +30,7 @@ export default function App() {
     <div className="min-h-screen flex flex-col items-center px-4 py-10 sm:py-16 gap-8">
       <header className="text-center max-w-lg">
         <p className="uppercase tracking-[0.3em] text-xs text-zinc-500 mb-2">
-          hackathon demo — 0% pass rate
+          -- 0% pass rate --
         </p>
         <h1 className="font-display text-3xl sm:text-4xl text-white">
           Prove you're <span className="text-glitch">not</span> a robot.
@@ -46,7 +46,7 @@ export default function App() {
       </div>
 
       <footer className="text-zinc-600 text-xs text-center pt-4">
-        CaptchaNeverAccepts — built for maximum humiliation, zero accessibility to humans.
+        CaptchaNeverAccepts — built for zero accessibility to humans.
       </footer>
 
       {modalMemeIndex !== null && (
